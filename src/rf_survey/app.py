@@ -3,9 +3,10 @@ import logging
 from typing import Any, Dict, Optional
 from pydantic import ValidationError
 from copy import deepcopy
+from pebble import ProcessPool
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from rf_shared.nats_client import NatsProducer
-from rf_shared.checksum import get_checksum
 from rf_shared.models import MetadataRecord, Envelope
 from zmsclient.zmc.v1.models import MonitorStatus
 
@@ -14,6 +15,7 @@ from rf_survey.receiver import Receiver
 from rf_survey.validators import ZmsReconfigurationParams
 from rf_survey.watchdog import ApplicationWatchdog
 from rf_survey.interfaces import IZmsMonitor, IMetrics
+from rf_survey.blocking_tasks import process_capture_job_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,7 @@ class SurveyApp:
         self.metrics = metrics
 
         self._processing_queue = asyncio.Queue(maxsize=8)
+        self.process_pool = ProcessPool(max_workers=2)
 
     async def start_survey(self):
         """Signals the survey runner to start and resumes the watchdog."""
@@ -87,6 +90,8 @@ class SurveyApp:
 
         finally:
             logger.info("Cleaning up resources...")
+            self.process_pool.close()
+            self.process_pool.join()
             await self.producer.close()
             logger.info("Shutdown complete.")
 
@@ -243,7 +248,9 @@ class SurveyApp:
         finally:
             remaining_jobs = self._processing_queue.qsize()
             if remaining_jobs > 0:
-                logger.warning(f"Shutting down with {remaining_jobs} unprocessed jobs in the queue. These will be dropped.")
+                logger.warning(
+                    f"Shutting down with {remaining_jobs} unprocessed jobs in the queue. These will be dropped."
+                )
 
     async def _process_single_job(self, job: ProcessingJob):
         """
@@ -263,59 +270,34 @@ class SurveyApp:
             logger.error(f"Failed to process capture job: {e}", exc_info=True)
 
     async def _process_capture_job(self, job: ProcessingJob) -> MetadataRecord:
+        """
+        Submits the blocking I/O job to the process pool and awaits its result.
+        """
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._process_capture_job_blocking, job)
+        processing_timeout_sec = 15.0
 
-    def _process_capture_job_blocking(self, job: ProcessingJob) -> MetadataRecord:
-        """
-        This function takes a complete ProcessingJob,
-        performs blocking I/O (saving the file), checksumming
-        and returns a final MetadataRecord.
-        """
+        def schedule_and_get_result():
+            future = self.process_pool.schedule(
+                function=process_capture_job_blocking,
+                args=[job, self.serial, self.app_info],
+                timeout=processing_timeout_sec,
+            )
 
-        raw_capture = job.raw_capture
-        receiver_config = job.receiver_config_snapshot
-        sweep_config = job.sweep_config_snapshot
-
-        timestamp_str = raw_capture.capture_timestamp.strftime("D%Y%m%dT%H%M%SM%f")
-
-        filename = f"{self.serial}-{self.app_info.hostname}-{timestamp_str}.sc16"
-        file_path = self.app_info.output_path / filename
+            result = future.result()
+            return result
 
         try:
-            with open(file_path, "wb") as f:
-                f.write(raw_capture.iq_data_bytes)
-            logger.debug(f"File stored as {file_path}")
-        except IOError as e:
-            logger.error(f"Failed to write capture file to disk: {e}", exc_info=True)
-            raise
+            metadata_record = await loop.run_in_executor(
+                None,
+                schedule_and_get_result,
+            )
+            return metadata_record
 
-        file_checksum = get_checksum(raw_capture.iq_data_bytes)
-        logger.debug(f"Calculated checksum: {file_checksum}")
-
-        metadata_record = MetadataRecord(
-            # Static application info
-            hostname=self.app_info.hostname,
-            organization=self.app_info.organization,
-            gcs=self.app_info.coordinates,
-            group=self.app_info.group,
-            # this is pulled after initial initalize
-            serial=self.serial,
-            bit_depth=16,
-            # Configuration context from the snapshots
-            interval=sweep_config.interval_sec,
-            length=receiver_config.duration_sec,
-            gain=receiver_config.gain_db,
-            sampling_rate=receiver_config.bandwidth_hz,
-            # Direct data from the capture itself
-            frequency=raw_capture.center_freq_hz,
-            timestamp=raw_capture.capture_timestamp,
-            # Data generated during this processing step
-            source_path=file_path,
-            checksum=file_checksum,
-        )
-
-        return metadata_record
+        except FuturesTimeoutError:
+            logger.error(
+                f"Processing job timed out after {processing_timeout_sec}s and was terminated. "
+            )
+            raise RuntimeError("Blocking I/O operation timed out") from None
 
     async def publish_metadata(self, record: MetadataRecord) -> None:
         logger.info(f"Publishing metadata: {record}")
