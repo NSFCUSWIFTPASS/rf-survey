@@ -5,9 +5,6 @@ import pytest
 from rf_survey.watchdog import ApplicationWatchdog, WatchdogTimeoutError
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.asyncio
 async def test_watchdog_times_out_if_not_pet():
     """
@@ -32,9 +29,6 @@ async def test_watchdog_times_out_if_not_pet():
         await watchdog_task
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.asyncio
 async def test_watchdog_does_not_time_out_if_pet_regularly():
     """
@@ -62,9 +56,6 @@ async def test_watchdog_does_not_time_out_if_pet_regularly():
     assert watchdog_task.exception() is None
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.asyncio
 async def test_watchdog_times_out_if_one_of_multiple_sources_is_silent():
     """
@@ -91,9 +82,6 @@ async def test_watchdog_times_out_if_one_of_multiple_sources_is_silent():
         await watchdog_task
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.asyncio
 async def test_watchdog_pause_and_start_logic():
     """
@@ -124,9 +112,6 @@ async def test_watchdog_pause_and_start_logic():
         await watchdog_task
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.parametrize("disabled_timeout", [None, 0, -10.0])
 @pytest.mark.asyncio
 async def test_watchdog_is_disabled_correctly(disabled_timeout):
@@ -156,9 +141,6 @@ async def test_watchdog_is_disabled_correctly(disabled_timeout):
         assert watchdog_task.exception() is None
 
 
-@pytest.mark.skip(
-    reason="This test is incompatible with the os._exit() watchdog. Validated at system level."
-)
 @pytest.mark.asyncio
 async def test_auto_registration_on_first_pet():
     """
