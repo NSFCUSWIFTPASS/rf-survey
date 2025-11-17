@@ -64,16 +64,8 @@ class ApplicationWatchdog:
                                 f"WATCHDOG TIMEOUT: Source '{source_name}' has not been pet in {time_since_last_pet:.2f}s "
                                 f"(limit: {self.timeout_seconds:.2f}s). Initiating graceful shutdown."
                             )
-                            # raise WatchdogTimeoutError
 
-                            sys.stdout.flush()
-                            sys.stderr.flush()
-
-                            # Terminate the entire process immediately.
-                            # This will bypass the hung thread and allow systemd to restart.
-                            # Temporary solution until a better long-term solution for
-                            # stopping the hung NFS write in a thread is devised
-                            os._exit(1)
+                            raise WatchdogTimeoutError
 
         except asyncio.CancelledError:
             logger.info("Watchdog was cancelled.")
