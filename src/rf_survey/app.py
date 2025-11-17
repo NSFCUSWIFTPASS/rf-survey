@@ -241,16 +241,9 @@ class SurveyApp:
             logger.info("Processing worker task cancelled.")
 
         finally:
-            logger.info(
-                f"Processing worker shutting down. Draining {self._processing_queue.qsize()} remaining jobs..."
-            )
-            # Drain the remaining jobs... Might be overkill
-            while not self._processing_queue.empty():
-                job = self._processing_queue.get_nowait()
-                logger.info("Processing one final job before exit...")
-                await self._process_single_job(job)
-
-            logger.info("Processing queue is empty. Worker finished.")
+            remaining_jobs = self._processing_queue.qsize()
+            if remaining_jobs > 0:
+                logger.warning(f"Shutting down with {remaining_jobs} unprocessed jobs in the queue. These will be dropped.")
 
     async def _process_single_job(self, job: ProcessingJob):
         """
