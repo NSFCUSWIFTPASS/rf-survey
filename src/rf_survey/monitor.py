@@ -1,8 +1,8 @@
 import asyncio
 import uuid
 import logging
-from datetime import datetime, timezone
-from typing import Protocol, Optional
+from datetime import datetime, timezone, timedelta
+from typing import Optional
 from websockets.asyncio.client import ClientConnection
 
 from zmsclient.zmc.client_asyncio import ZmsZmcClientAsyncio
@@ -164,38 +164,11 @@ class ZmsMonitor:
         try:
             while True:
                 try:
-                    time_until_ack_by: Optional[float] = None
-
-                    # Determine the deadline for the next heartbeat
-                    if self._status_ack_by:
-                        now = datetime.now(timezone.utc)
-                        if self._status_ack_by > now:
-                            time_until_ack_by = (
-                                self._status_ack_by - now
-                            ).total_seconds()
-                        else:
-                            logger.warning(
-                                "Heartbeat deadline is in the past! Sending immediately."
-                            )
-                            time_until_ack_by = 0
-
-                    command = await asyncio.wait_for(
-                        self._command_queue.get(), timeout=time_until_ack_by
-                    )
-
-                    # If we get here, a command was received before the timeout.
-                    await self._process_command(command)
-
-                except asyncio.TimeoutError:
-                    # This is the expected outcome when the heartbeat timer expires.
-                    logger.debug("Heartbeat interval expired. Sending heartbeat.")
-                    await self._send_heartbeat()
+                    await self._run_next_cycle()
 
                 except Exception as e:
-                    # Prevents a single bad command from crashing the whole monitor.
                     logger.error(
                         f"Error in state machine loop iteration: {e}. Retrying in 10s.",
-                        exc_info=True,
                     )
                     await asyncio.sleep(10)
 
@@ -204,6 +177,28 @@ class ZmsMonitor:
 
         finally:
             logger.info("State machine loop has shut down.")
+
+    async def _run_next_cycle(self):
+        time_until_ack_by = 0
+
+        # Determine the deadline for the next heartbeat
+        if self._status_ack_by:
+            now = datetime.now(timezone.utc)
+            diff = (self._status_ack_by - now).total_seconds()
+            time_until_ack_by = max(0.0, diff)
+
+        try:
+            command = await asyncio.wait_for(
+                self._command_queue.get(), timeout=time_until_ack_by
+            )
+
+            # If we get here, a command was received before the timeout.
+            await self._process_command(command)
+
+        except asyncio.TimeoutError:
+            # This is the expected outcome when the heartbeat timer expires.
+            logger.debug("Heartbeat interval expired. Sending heartbeat.")
+            await self._send_heartbeat()
 
     async def _event_listener_loop(self):
         logger.info("Starting WebSocket listener...")
@@ -296,31 +291,29 @@ class ZmsMonitor:
             body.last_pending_outcome = self._last_pending_outcome
             body.last_pending_message = self._last_pending_message
 
-        try:
-            logger.debug(f"Sending heartbeat: {body.to_dict()}")
-            response = await self.zmc_client.update_monitor_state_op_status(
-                monitor_id=self.monitor_id, body=body
-            )
-            state = response.parsed
-            if isinstance(state, MonitorState):
-                # Successfully sent, update the next deadline
-                if state.status_ack_by:
-                    self._status_ack_by = state.status_ack_by
-                    logger.debug(
-                        f"Next heartbeat due by: {self._status_ack_by.isoformat()}"
-                    )
-                else:
-                    logger.debug("No next heartbeat required by ZMS for now.")
-
-                self._clear_ack_state()
-
-            else:
-                logger.error(
-                    f"Heartbeat failed. Server response: {state.error if isinstance(state, Error) else 'Unknown'}"
+        logger.debug(f"Sending heartbeat: {body.to_dict()}")
+        response = await self.zmc_client.update_monitor_state_op_status(
+            monitor_id=self.monitor_id, body=body
+        )
+        state = response.parsed
+        if isinstance(state, MonitorState):
+            # Successfully sent, update the next deadline
+            if state.status_ack_by:
+                self._status_ack_by = state.status_ack_by
+                logger.debug(
+                    f"Next heartbeat due by: {self._status_ack_by.isoformat()}"
                 )
+            else:
+                logger.debug("No next heartbeat required by ZMS for now.")
 
-        except Exception as e:
-            logger.error(f"Heartbeat Monitor PUT request failed: {e}", exc_info=True)
+            self._clear_ack_state()
+
+        else:
+            # If there is some error set an ackby to 30s in future
+            self._status_ack_by = datetime.now(timezone.utc) + timedelta(seconds=30)
+            logger.error(
+                f"Heartbeat failed. Server response: {state.error if isinstance(state, Error) else 'Unknown'}"
+            )
 
     def _update_op_status_from_target(self, target_status: MonitorStatus) -> None:
         if target_status == MonitorStatus.PAUSED:
