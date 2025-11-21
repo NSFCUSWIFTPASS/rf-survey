@@ -384,8 +384,6 @@ class SurveyApp:
         logger.info("Health monitor (for polling metrics) started.")
         try:
             while True:
-                await asyncio.sleep(30)
-
                 # Poll for temperature
                 temp = await self.receiver.get_temperature()
                 if temp is not None:
@@ -395,6 +393,8 @@ class SurveyApp:
                 self.metrics.update_queue_size(queue_size)
 
                 logger.debug("Polled metrics updated (temp, queue).")
+
+                await asyncio.sleep(30)
 
         except asyncio.CancelledError:
             logger.info("Health monitor was cancelled.")
