@@ -304,7 +304,17 @@ class SurveyApp:
         envelope = Envelope.from_metadata(record)
         payload = envelope.model_dump_json().encode()
 
-        await self.producer.publish(payload)
+        while True:
+            try:
+                await self.producer.publish(payload)
+                return
+            except Exception as e:
+                logger.warning(
+                    f"NATS is down ({e}). Pausing processing until reconnected..."
+                )
+                # Pet.. we are waiting for NATs to come back
+                await self.watchdog.pet("app_worker_loop")
+                await asyncio.sleep(5)
 
     async def _wait_until_next_collection(self, wait_duration: float) -> None:
         logger.info(

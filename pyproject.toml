@@ -16,7 +16,7 @@ dependencies = [
     "pebble==5.1.3",
     "aiohttp==3.13.2",
     "prometheus-client[aiohttp] @ git+https://github.com/prometheus/client_python.git@1783ca87acbed1d45ebaa124b7b22244f9c9c2e8",
-    "rf-shared @ git+https://github.com/NSFCUSWIFTPASS/rf-shared.git@v0.2.3",
+    "rf-shared @ git+https://github.com/NSFCUSWIFTPASS/rf-shared.git@v0.2.4",
     "zms-client @ git+https://gitlab.flux.utah.edu/openzms/zms-client-py.git@fd4a5a0902bfe91fad0112c75bf1eb1723d6098d"
 ]
 
