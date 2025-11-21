@@ -76,6 +76,9 @@ class ZmsEventSubscriber:
                 evt = self._parse_event(message)
                 if evt:
                     await self.on_event(ws, evt, message)
+                else:
+                    logger.error("Received invalid event data. Closing connection.")
+                    break
 
         except asyncio.CancelledError:
             logger.info(f"WebSocket listener for {subscription_id} cancelled.")
@@ -97,9 +100,7 @@ class ZmsEventSubscriber:
                     async with self._subscription_manager() as sub_id:
                         await self._listen_for_events(sub_id)
 
-                        logger.info(
-                            "WebSocket connection closed cleanly by the server."
-                        )
+                        logger.info("WebSocket connection closed.")
 
                 except (
                     ConnectionClosed,
@@ -113,7 +114,6 @@ class ZmsEventSubscriber:
                 except Exception as e:
                     logger.error(
                         f"An unexpected error occurred in the listener: {e}",
-                        exc_info=True,
                     )
 
                 if not self.reconnect_on_error:
