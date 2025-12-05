@@ -1,7 +1,7 @@
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from uuid import uuid4
 from datetime import datetime
 
@@ -17,6 +17,12 @@ class SweepConfig(BaseModel):
     records_per_step: int
     interval_sec: int
     max_jitter_sec: float
+
+    @field_validator("records_per_step")
+    def ensure_min_records(cls, v: int) -> int:
+        if v <= 0:
+            return 1
+        return v
 
     @model_validator(mode="after")
     def end_must_be_gte_start(self) -> "SweepConfig":
