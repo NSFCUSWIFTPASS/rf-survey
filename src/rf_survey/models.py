@@ -19,7 +19,6 @@ class SweepConfig(BaseModel):
     max_jitter_sec: float
 
     @field_validator("records_per_step")
-    @classmethod
     def ensure_min_records(cls, v: int) -> int:
         if v <= 0:
             return 1
