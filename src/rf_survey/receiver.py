@@ -20,6 +20,7 @@ class Receiver:
     ):
         self._hardware_lock = threading.Lock()
         self.config = receiver_config
+        self._capture_buffer = None
 
     def initialize(self) -> None:
         """Connects to and fully configures the USRP hardware and stream."""
@@ -55,6 +56,11 @@ class Receiver:
         st_args.channels = [0]
         self.rx_metadata = uhd.types.RXMetadata()
         self.rx_streamer = self.usrp.get_rx_stream(st_args)
+
+        total_samples = self.config.num_samples
+        if self._capture_buffer is None or self._capture_buffer.size != total_samples:
+            logger.info(f"Allocating new capture buffer of size {total_samples}")
+            self._capture_buffer = np.zeros(total_samples, dtype=np.int32)
 
         logger.info("USRP hardware initialization complete.")
 
@@ -99,6 +105,7 @@ class Receiver:
         Receives samples from the SDR at a specified frequency.
         """
         assert self.rx_streamer is not None, "Streamer not properly initialized"
+        assert self._capture_buffer is not None, "Capture buffer not initialized"
 
         with self._hardware_lock:
             config_at_capture = deepcopy(self.config)
@@ -107,7 +114,6 @@ class Receiver:
             self.usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(center_freq_hz), 0)
 
             samples_to_collect = self.config.num_samples
-            capture_buffer = np.zeros(samples_to_collect, dtype=np.int32)
             rx_metadata = uhd.types.RXMetadata()
 
             # Wait for lo to settle instead of over sampling and discarding a margin
@@ -126,7 +132,7 @@ class Receiver:
 
                 start_recv = time.monotonic()
                 samples_received = self.rx_streamer.recv(
-                    capture_buffer, rx_metadata, timeout=timeout
+                    self._capture_buffer, rx_metadata, timeout=timeout
                 )
                 recv_duration = time.monotonic() - start_recv
 
@@ -149,8 +155,10 @@ class Receiver:
             # This needs to be tested further, it seems it can drift
             # capture_timestamp = self._get_timestamp(rx_metadata)
 
+            iq_data_bytes = self._capture_buffer.tobytes()
+
             raw_capture = RawCapture(
-                iq_data_bytes=capture_buffer.tobytes(),
+                iq_data_bytes=iq_data_bytes,
                 center_freq_hz=center_freq_hz,
                 capture_timestamp=capture_timestamp,
             )
